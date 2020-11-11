@@ -1,0 +1,217 @@
+<template>
+  <div class="img-table">
+    <header class="filter df">
+      <div class="filter-item">
+        <div class="filter-input">
+          <el-input placeholder="名称" clearable v-model="filter.name" @change="getImgList"></el-input>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-input">
+          <el-input placeholder="分辨率范围(宽X高)" v-model="filter.resolution" clearable>
+            <el-select style="width: 100px" v-model="filter.area"
+                       v-slot="prepend" placeholder="请选择">
+              <el-option label="小于等于" value="1"></el-option>
+              <el-option label="大于等于" value="2"></el-option>
+            </el-select>
+          </el-input>
+        </div>
+      </div>
+      <div class="filter-item">
+        <div class="filter-input">
+          <el-date-picker
+              @change="getImgList"
+              v-model="filter.date"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="timestamp"
+              :default-time="['00:00:00', '23:59:59']"
+              placeholder="日期范围">
+          </el-date-picker>
+        </div>
+      </div>
+      <div class="filter-item submit">
+        <wired-button elevation="3" class="submit-btn" @click="getImgList">查询</wired-button>
+      </div>
+    </header>
+    <el-table :data="tableData" :default-sort="{prop: 'date', order: 'descending'}">
+      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip>
+<!--        <template slot="header" slot-scope="scope">-->
+<!--          <div class="df">-->
+<!--            名称<el-input size="medium" v-model="nameSearch" placeholder="筛选"></el-input>-->
+<!--           </div>-->
+<!--        </template>-->
+      </el-table-column>
+      <el-table-column prop="thumbnail" label="缩略图"  min-width="90">
+        <template v-slot="scope">
+          <el-image :src="scope.row.url+'@80w_80h_1e_1c.webp'"
+                    :preview-src-list="[scope.row.url+'@1e_1c.webp']"></el-image>
+        </template>
+      </el-table-column>
+      <el-table-column prop="resolution" label="分辨率"  min-width="110"
+                       :formatter="(row)=>row.width+' X '+ row.height"></el-table-column>
+      <el-table-column prop="url" label="链接" show-overflow-tooltip  min-width="100"></el-table-column>
+      <el-table-column prop="date" label="时间" sortable
+                       min-width="98"
+                       :formatter="row=>row.date?parseTime(row.date): ''"></el-table-column>
+      <el-table-column prop="action" label="操作(复制)"  min-width="160">
+        <template v-slot="scope">
+          <wired-button @click.prevent="copy(scope.row.url,index)" v-for="(btn,index) in actionButtons" :key="btn"
+                        elevation="1" type="text" size="small">{{btn}}
+          </wired-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="footer-pagination">
+      <el-pagination
+          background
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+          :current-page="pageNo"
+          :page-sizes="[10, 20, 50]"
+          :page-size="pageSize"
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="total">
+      </el-pagination>
+    </div>
+
+  </div>
+</template>
+
+<script>
+  import {copyToClipboard, parseTime} from "../utils";
+  import Idb from 'idb-js'
+  import db_img_config from '../db_img_config'
+
+  export default {
+    name: 'List',
+    data() {
+      return {
+        pageNo: 1,
+        pageSize: 10,
+        total: 0,
+        tableData: [
+          {
+            name: '654846546.jpg', width: 1920, height: 1080,
+            url: 'https://i0.hdslb.com/bfs/album/3fd1887f78c10e26b3313a221cc2debcf6793020.jpg'
+          },
+          {
+            name: '6548462546.jpg', width: 1920, height: 1080,
+            url: 'https://i0.hdslb.com/bfs/album/bb3b6973bf1ec1885d9bc80c8540bb9b0181f1f2.jpg'
+          }
+        ],
+        actionButtons: ['原图', 'webp', 'MD'],
+        nameSearch: '',
+        filter: {
+          name: '',
+          resolution: '',
+          area: '1',
+          date: ''
+        }
+      }
+    },
+    computed: {
+      // filterTableData() {
+      //   return this.tableData.filter(row=>!this.nameSearch || row.name.includes(this.nameSearch))
+      // }
+    },
+    methods: {
+      parseTime(time){
+        return parseTime(time)
+      },
+      copy(input, type) {
+        let _input = input
+        switch (type) {
+          case 1:
+            _input += '@1e_1c.webp'
+            break;
+          case 2:
+            _input = `![](${_input+'@1e_1c.webp'})`
+            break;
+          default:
+            break
+        }
+        copyToClipboard(_input)
+      },
+      isIncludesName(name, key){
+        if(!key) return true;
+        const low = key.toLocaleLowerCase()
+        const upper = key.toLocaleUpperCase()
+        return key && [key, low, upper].some(f=> name.includes(f))
+      },
+      InResolution (row, key){
+        if (!key) return true;
+        const [ width, height ] = key.split('X')
+        if (this.filter.area === '1') {
+          return row.width <= width && row.height <= height
+        } else {
+          return row.width >= width && row.height >= height
+        }
+      },
+      InDate(row, date){
+        console.log(date);
+        if (!date) return true
+        const [ start, end ] = date
+        return row.date >= start && row.date <= end
+      },
+      filterQuery (list){
+        let result = list
+        const { name, resolution, date } = this.filter;
+        result = result.filter(row=> {
+          return this.isIncludesName(row.name, name) &&
+            this.InResolution(row, resolution) &&
+              this.InDate(row, date)
+        })
+        return result
+      },
+      getImgList(){
+        Idb(db_img_config).then(img_db=>{
+          img_db.queryAll({
+            tableName: "img",
+            success: r => {
+              r = this.filterQuery(r)
+              this.total = r.length
+              const start = (this.pageNo - 1) * this.pageSize
+              const end = start + this.pageSize
+              this.tableData = r.slice(start, end)
+            }
+          });
+        })
+      },
+      handleSizeChange (val){
+        this.pageSize = val
+        this.getImgList()
+      },
+      handleCurrentChange (val){
+        this.pageNo = val
+        this.getImgList()
+      },
+    },
+    mounted() {
+      this.getImgList()
+    }
+  }
+</script>
+
+<style lang="less" scoped>
+  .df{
+    display: flex;
+  }
+  .footer-pagination{
+    text-align: center;
+    padding: 20px 0;
+  }
+  .filter{
+    .filter-label{
+      color: #4c4c4c;
+      font-size: 16px;
+    }
+    .filter-item{
+      display: flex;
+      align-items: center;
+      margin-right: 10px;
+    }
+  }
+</style>
